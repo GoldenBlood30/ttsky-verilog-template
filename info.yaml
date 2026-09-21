@@ -1,56 +1,93 @@
 # Tiny Tapeout project information
 project:
-  title:        ""      # Project title
-  author:       ""      # Your name
-  discord:      ""      # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  ""      # One line description of what your project does
-  language:     "Verilog" # other examples include SystemVerilog, Amaranth, VHDL, etc
-  clock_hz:     0       # Clock frequency in Hz (or 0 if not applicable)
+  title:       "5-Stage Pipelined MIPS with I2C/MMIO Loader"  # EDIT: your real title
+  author:      "YOUR NAME HERE"                                # EDIT
+  discord:     "your_discord_username"                         # EDIT (optional)
+  description: "A 5-stage pipelined MIPS-style CPU with forwarding, hazard stalling, and branch prediction, programmable and controllable over I2C via a memory-mapped IO loader (instruction memory, data memory, and register file are all dynamically loadable)."
+  language:    "Verilog"
+  clock_hz:    25000000        # matches CLOCK_PERIOD=40 in config.json (40ns = 25MHz)
 
-  # How many tiles your design occupies? A single tile is about 167x108 uM.
-  tiles: "1x1"          # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
+  # TILE SIZE: set to 8x2, the largest standard option, deliberately with
+  # margin to spare. Reasoning: the last hardening attempt crashed during
+  # Yosys elaboration (BHT/BTB/PHT module-name collision, now fixed) before
+  # ever reaching floorplanning, so there is still no real utilization
+  # number from the tool itself. A hand-derived estimate of the design's
+  # register/memory content (mechanically counted from the actual source)
+  # plus its combinational logic came out to roughly 68% of the 8x2 budget
+  # -- comfortable margin, but explicitly an ESTIMATE, not a synthesis
+  # measurement. Smaller options (4x2, 6x2) were estimated close to or
+  # over their own budgets in earlier passes of that analysis. Once a real
+  # utilization number comes back from this run, this can be safely
+  # reduced if it's far under budget -- but 8x2 is the safe starting point
+  # to avoid a second area-related failure.
+  tiles: "8x2"   # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
 
-  # Your top module name must start with "tt_um_". Make it unique by including your github username:
-  top_module:  "tt_um_example"
+  # Your top module name must start with "tt_um_".
+  top_module: "tt_um_mips_i2c"
 
-  # List your project's source files here.
-  # Source files must be in ./src and you must list each source file separately, one per line.
-  # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
+  # Every file the design uses -- a missing entry here causes an "unknown
+  # module" error during synthesis, the same class of failure as the
+  # earlier Icarus "unknown module" errors seen in local checks.
   source_files:
-    - "project.v"
+    - "tt_um_mips_i2c.v"
+    - "top.v"
+    - "i2c_slave_mmio.v"
+    - "mmio_decoder.v"
+    - "data_memory.v"
+    - "instruction_memory.v"
+    - "reg_file.v"
+    - "ALU.v"
+    - "BHT.v"
+    - "BTB.v"
+    - "branching_unit.v"
+    - "comparator.v"
+    - "control_unit.v"
+    - "EX_MEM_register.v"
+    - "Flushing_unit.v"
+    - "forward_rt.v"
+    - "Forwarding_unit.v"
+    - "Forward_rs.v"
+    - "ID_EX_register.v"
+    - "IF_ID_register.v"
+    - "M_WB_register.v"
+    - "mux_1.v"
+    - "mux_1_execution.v"
+    - "mux_2.v"
+    - "mux_2_execution.v"
+    - "mux_3_execution.v"
+    - "Pc.v"
+    - "PHT.v"
+    - "Sign_extender.v"
+    - "stalling_unit.v"
+    - "Write_back_mux.v"
+    - "Xor_result.v"
 
-# The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
-# This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
-pinout:
-  # Inputs
-  ui[0]: ""
-  ui[1]: ""
-  ui[2]: ""
-  ui[3]: ""
-  ui[4]: ""
-  ui[5]: ""
-  ui[6]: ""
-  ui[7]: ""
-
-  # Outputs
-  uo[0]: ""
-  uo[1]: ""
-  uo[2]: ""
-  uo[3]: ""
-  uo[4]: ""
-  uo[5]: ""
-  uo[6]: ""
-  uo[7]: ""
-
-  # Bidirectional pins
-  uio[0]: ""
-  uio[1]: ""
-  uio[2]: ""
-  uio[3]: ""
-  uio[4]: ""
-  uio[5]: ""
-  uio[6]: ""
-  uio[7]: ""
+  # The pinout of your project. Must match tt_um_mips_i2c.v exactly.
+  pinout:
+    ui[0]: "scl"
+    ui[1]: ""
+    ui[2]: ""
+    ui[3]: ""
+    ui[4]: ""
+    ui[5]: ""
+    ui[6]: ""
+    ui[7]: ""
+    uo[0]: "led"
+    uo[1]: ""
+    uo[2]: ""
+    uo[3]: ""
+    uo[4]: ""
+    uo[5]: ""
+    uo[6]: ""
+    uo[7]: ""
+    uio[0]: "sda"
+    uio[1]: ""
+    uio[2]: ""
+    uio[3]: ""
+    uio[4]: ""
+    uio[5]: ""
+    uio[6]: ""
+    uio[7]: ""
 
 # Do not change!
 yaml_version: 6
