@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// 32 x 32 register file. Single shared write port (I2C programming wins over
+// the CPU write-back when both fire in the same cycle; r0 is never written by
+// either). Sharing one port instead of two saves a 2:1 mux per stored bit.
 module reg_file(
     input        clk,
     input        rst,
@@ -24,15 +27,17 @@ module reg_file(
     // I2C readback of register prog_addr.
     assign prog_rdata = RF[prog_addr];
 
+    wire        sel_prog = prog_we && (prog_addr != 5'd0);
+    wire        wr_en    = sel_prog || (Reg_write && (rd != 5'd0));
+    wire [4:0]  wr_addr  = sel_prog ? prog_addr  : rd;
+    wire [31:0] wr_data  = sel_prog ? prog_wdata : write_data;
+
     always @(posedge clk) begin
         if (rst) begin
             for (i = 0; i <= 31; i = i + 1)
                 RF[i] <= i;
-        end else begin
-            if (prog_we && (prog_addr != 5'd0))
-                RF[prog_addr] <= prog_wdata;
-            else if (Reg_write && rd != 5'd0)
-                RF[rd] <= write_data;
+        end else if (wr_en) begin
+            RF[wr_addr] <= wr_data;
         end
     end
 endmodule
