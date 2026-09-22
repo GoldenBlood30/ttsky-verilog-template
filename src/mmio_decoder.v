@@ -1,13 +1,15 @@
 `timescale 1ns / 1ps
 
-// MMIO map (resized for the 64-word IMEM/DMEM):
-//   0x0000-0x00FC : IMEM,    64 x 32-bit words
+// MMIO map (IMEM/DMEM depth set by IM_AW / DM_AW; defaults 16 / 8 words):
+//   0x0000 .. 0x0000+4*(2**IM_AW)-4 : IMEM,    2**IM_AW x 32-bit words
 //   0x1000-0x107C : REGFILE, R0-R31
-//   0x2000-0x20FC : DMEM,    64 x 32-bit words
+//   0x2000 .. 0x2000+4*(2**DM_AW)-4 : DMEM,    2**DM_AW x 32-bit words
+// Word addresses beyond the implemented depth are UNMAPPED: writes are
+// ignored and reads return 0xDEADBEEF (they never alias onto real words).
 //   0x3000        : CSR      (bit0 RUN, bit1 DONE)
 //   0x3004        : TARGET_PC
 //   0x3008        : live PC (read-only)
-module mmio_decoder(
+module mmio_decoder (
     input        clk,
     input        rst,
     input        mmio_wr,
@@ -34,8 +36,14 @@ module mmio_decoder(
     output reg [31:0] mmio_rdata
 );
 
-    // IMEM: 0x0000-0x00FF (64 words x 4 bytes = 256 bytes)
-    assign imem_prog_we    = mmio_wr && (mmio_addr[15:8] == 8'h00) &&
+    // Region hits (word index must be inside the implemented depth).
+    localparam IM_AW = 4;   // must match instruction_memory.v's IM_AW
+    localparam DM_AW = 3;   // must match data_memory.v's DM_AW
+    wire imem_hit = (mmio_addr[15:8] == 8'h00) && (mmio_addr[7:2] < (1 << IM_AW));
+    wire dmem_hit = (mmio_addr[15:8] == 8'h20) && (mmio_addr[7:2] < (1 << DM_AW));
+
+    // IMEM
+    assign imem_prog_we    = mmio_wr && imem_hit &&
                              (mmio_addr[1:0] == 2'b00);
     assign imem_prog_addr  = mmio_addr[7:2];
     assign imem_prog_wdata = mmio_wdata;
@@ -47,8 +55,8 @@ module mmio_decoder(
     assign regfile_prog_addr  = mmio_addr[6:2];
     assign regfile_prog_wdata = mmio_wdata;
 
-    // DMEM: 0x2000-0x20FF (64 words x 4 bytes = 256 bytes)
-    assign dmem_prog_we    = mmio_wr && (mmio_addr[15:8] == 8'h20) &&
+    // DMEM
+    assign dmem_prog_we    = mmio_wr && dmem_hit &&
                              (mmio_addr[1:0] == 2'b00);
     assign dmem_prog_addr  = mmio_addr[7:2];
     assign dmem_prog_wdata = mmio_wdata;
@@ -56,11 +64,11 @@ module mmio_decoder(
     // The *_prog_addr outputs above already index the memories, so each
     // memory's rdata is the word at mmio_addr.
     always @(*) begin
-        if (mmio_addr[15:8] == 8'h00)
+        if (imem_hit)
             mmio_rdata = imem_rdata;
         else if ((mmio_addr >= 16'h1000) && (mmio_addr <= 16'h107C))
             mmio_rdata = regfile_rdata;
-        else if (mmio_addr[15:8] == 8'h20)
+        else if (dmem_hit)
             mmio_rdata = dmem_rdata;
         else if (mmio_addr == 16'h3000)
             mmio_rdata = {30'd0, csr[1:0]};
