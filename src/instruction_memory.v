@@ -1,15 +1,17 @@
 `timescale 1ns / 1ps
 
-// 256-BYTE (64 x 32-bit word) byte-addressed instruction memory.
-// Resized from the original 1KB/256-word version to fit the Tiny Tapeout
-// sky130 area budget (2048 bits total, matches the target size table).
-// CPU fetch keeps the original byte-addressed PC convention.
-// Programming writes one 32-bit instruction at a time, MSB first.
+// Word-organised instruction memory: 2**IM_AW 32-bit words, plain flip-flops.
+// (Tiny Tapeout sky130 has no SRAM macro, so every bit costs area; the depth
+// is a parameter so it can be sized to the tile. Default 16 words = 512 bits.)
 //
-// Valid byte addresses: 0x00 - 0xFC (64 words). PC bits above [7:0] are
-// ignored by the array index, so a program must not run past word 63
-// without TARGET_PC stopping it first (address wraps otherwise).
-module instruction_memory(
+// CPU fetch keeps the byte-addressed PC convention: the word index is
+// PC[IM_AW+1:2] (PC is always word aligned). PC bits above that are ignored,
+// so a program must not run past the last word without TARGET_PC stopping it
+// first (the address wraps otherwise).
+// Programming writes one 32-bit instruction at a time (MSB byte first on the
+// I2C wire, stored as a single word here). No reset: contents are undefined
+// until programmed over I2C; fetch is frozen until RUN=1.
+module instruction_memory (
     input        rst,
     input        clk,
     input [31:0] PC_out,
@@ -19,21 +21,18 @@ module instruction_memory(
     input [31:0] prog_wdata,
     output [31:0] prog_rdata
 );
-    reg [7:0] IM [255:0];
+    localparam IM_AW    = 4;    // 2**IM_AW = 16 words. Must match mmio_decoder.v's IM_AW and BTB.v's BTB_W (= IM_AW+3).
+    localparam IM_WORDS = 1 << IM_AW;
 
-    assign instruction_code = {IM[PC_out[7:0]], IM[PC_out[7:0]+8'd1],
-                               IM[PC_out[7:0]+8'd2], IM[PC_out[7:0]+8'd3]};
+    reg [31:0] IM [IM_WORDS-1:0];
 
-    // I2C readback: the word at prog_addr, MSB first (same layout as writes).
-    assign prog_rdata = {IM[{prog_addr,2'b00}], IM[{prog_addr,2'b00}+8'd1],
-                         IM[{prog_addr,2'b00}+8'd2], IM[{prog_addr,2'b00}+8'd3]};
+    assign instruction_code = IM[PC_out[IM_AW+1:2]];
+
+    // I2C readback of the word at prog_addr.
+    assign prog_rdata = IM[prog_addr[IM_AW-1:0]];
 
     always @(posedge clk) begin
-        if (prog_we) begin
-            IM[{prog_addr,2'b00}]       <= prog_wdata[31:24];
-            IM[{prog_addr,2'b00}+8'd1]  <= prog_wdata[23:16];
-            IM[{prog_addr,2'b00}+8'd2]  <= prog_wdata[15:8];
-            IM[{prog_addr,2'b00}+8'd3]  <= prog_wdata[7:0];
-        end
+        if (prog_we)
+            IM[prog_addr[IM_AW-1:0]] <= prog_wdata;
     end
 endmodule
