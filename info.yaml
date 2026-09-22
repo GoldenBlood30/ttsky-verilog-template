@@ -5,7 +5,7 @@ project:
   discord:     "your_discord_username"                         # EDIT (optional)
   description: "A 5-stage pipelined MIPS-style CPU with forwarding, hazard stalling, and branch prediction, programmable and controllable over I2C via a memory-mapped IO loader (instruction memory, data memory, and register file are all dynamically loadable)."
   language:    "Verilog"
-  clock_hz:    25000000        # matches CLOCK_PERIOD=40 in config.json (40ns = 25MHz)
+  clock_hz:    10000000        # matches CLOCK_PERIOD=40 in config.json (100ns = 10MHz)
 
   # TILE SIZE: set to 8x2, the largest standard option, deliberately with
   # margin to spare. Reasoning: the last hardening attempt crashed during
@@ -20,7 +20,7 @@ project:
   # utilization number comes back from this run, this can be safely
   # reduced if it's far under budget -- but 8x2 is the safe starting point
   # to avoid a second area-related failure.
-  tiles: "8x2"   # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
+  tiles: "4x4"   # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
 
   # Your top module name must start with "tt_um_".
   top_module: "tt_um_mips_i2c"
