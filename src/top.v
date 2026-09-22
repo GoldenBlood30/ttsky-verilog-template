@@ -9,11 +9,13 @@
 //   MCU can read back any of those addresses at any time, plus the live PC
 //   at 0x3008, with a repeated-START I2C read.
 //
-// Memories resized for the Tiny Tapeout sky130 area budget:
-//   IMEM: 64 x 32-bit words (2048 bits)
-//   DMEM: 64 x 32-bit words (2048 bits)
-//   REGFILE: 32 x 32-bit words (1024 bits, unchanged)
-module top(
+// Memories sized for the Tiny Tapeout sky130 area budget (flip-flop arrays,
+// no SRAM macros). Depths are log2 parameters:
+//   IMEM: 2**IM_AW 32-bit words  (default IM_AW=4 -> 16 words = 512 bits)
+//   DMEM: 2**DM_AW 32-bit words  (default DM_AW=3 ->  8 words = 256 bits)
+//   REGFILE: 32 x 32-bit words (1024 bits, fixed by the ISA)
+// (IM_AW=6, DM_AW=6 restores the old 64/64 sizes but does NOT fit any TT tile.)
+module top (
     input  clk,
     input  rst,
     input  scl,
@@ -80,19 +82,32 @@ module top(
     reg done;
     reg [2:0] drain_count;
 
+    wire IF_ID_comparator;
     wire run_req = csr[0];
 
     // TARGET_PC is the first instruction that must NOT execute.
     // Once PC_out reaches it, insert a NOP into IF/ID and allow the
     // already-fetched instructions to move through EX/MEM/WB.
-    wire target_reached = run_req && !done && (PC_out == target_pc) && !PC_flush;
+    //
+    // A beq resolves in EX, two cycles after it is fetched. While a beq is
+    // still unresolved in ID, PC_out is only a PREDICTED successor, so a match
+    // with TARGET_PC there may be a wrong-path fetch. In that case fetch is held
+    // (bubble into IF/ID) but the drain is NOT started ("target_defer"); one cycle
+    // later the branch is in EX and either PC_flush redirects the PC to the true
+    // successor (run continues) or the true successor really is TARGET_PC and the
+    // drain starts normally. Without this, a loop that ends on its back-branch
+    // (TARGET_PC = branch + 4) halted early whenever the branch was mispredicted.
+    wire target_match   = run_req && !done && (PC_out == target_pc) && !PC_flush;
+    wire branch_in_id   = (IF_ID_comparator == 1'b0);
+    wire target_reached = target_match && !branch_in_id;
+    wire target_defer   = target_match &&  branch_in_id;
     wire drain_active = (drain_count != 3'd0);
 
     // LOAD/HALT: freeze every pipeline register.
     // DRAIN: stop fetching new instructions, but allow existing pipeline
     // contents to advance normally.
     wire pipeline_freeze = !run_req || done;
-    wire stop_fetch = target_reached || drain_active;
+    wire stop_fetch = target_reached || target_defer || drain_active;
     wire pc_hold = pipeline_freeze || stop_fetch;
 
     // ================================================================
@@ -110,7 +125,6 @@ module top(
     wire [31:0] PC_calculated;
 
     wire [31:0] IF_ID_instruction_code;
-    wire IF_ID_comparator;
     wire [31:0] IF_ID_PC_out;
     wire [3:0] IF_ID_BHT_rd_addr;
     wire IF_ID_stall, IF_ID_flush;
