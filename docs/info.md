@@ -1,6 +1,6 @@
 # 5-Stage Pipelined MIPS with I2C/MMIO Loader
 
-## How it works
+## How it works 
 
 This is a 5-stage pipelined MIPS-style CPU (fetch, decode, execute, memory,
 writeback) with:
