@@ -6,7 +6,9 @@
 // TARGET_PC. A wrong/stale prediction is always caught by the mispredict check
 // in the EX stage (Flushing_unit) and corrected with the true target, so
 // narrowing this table can never change program results.
-module BTB (
+module BTB #(
+    parameter BTB_W = 8         // = IM_AW + 3; set by custom_risc_v_core
+) (
 input clk,
 input [3:0] rd_addr,
 input BTB_write_control,
@@ -15,7 +17,6 @@ input [31:0] BTB_write_data,
 input rst,
 output [31:0] BTB_rd_data
     );
-    localparam BTB_W = 7;   // = instruction_memory.v's IM_AW (4) + 3. Change both together.
     integer i;
     reg [BTB_W-1:0] btb_mem [15:0];
     assign BTB_rd_data = {{(32-BTB_W){1'b0}}, btb_mem[rd_addr]};

@@ -1,36 +1,28 @@
 # Tiny Tapeout project information
 project:
-  title:       "5-Stage Pipelined MIPS with I2C/MMIO Loader"  # EDIT: your real title
+  title:       "Reprogrammable Custom RISC-V Processor"
   author:      "YOUR NAME HERE"                                # EDIT
   discord:     "your_discord_username"                         # EDIT (optional)
-  description: "A 5-stage pipelined MIPS-style CPU with forwarding, hazard stalling, and branch prediction, programmable and controllable over I2C via a memory-mapped IO loader (instruction memory, data memory, and register file are all dynamically loadable)."
+  description: "A reprogrammable 5-stage pipelined custom RISC-V processor: no program is hardened into the chip; instruction memory, data memory and registers are loaded over I2C after fabrication. Forwarding, load-use stalling, branch prediction, and x86-style ALU flags (ZF CF SF OF PF AF) in the CSR."
   language:    "Verilog"
-  clock_hz:    10000000        # matches CLOCK_PERIOD=40 in config.json (100ns = 10MHz)
+  clock_hz:    10000000        # matches CLOCK_PERIOD=100 in config.json (100ns = 10MHz)
 
-  # TILE SIZE: set to 8x2, the largest standard option, deliberately with
-  # margin to spare. Reasoning: the last hardening attempt crashed during
-  # Yosys elaboration (BHT/BTB/PHT module-name collision, now fixed) before
-  # ever reaching floorplanning, so there is still no real utilization
-  # number from the tool itself. A hand-derived estimate of the design's
-  # register/memory content (mechanically counted from the actual source)
-  # plus its combinational logic came out to roughly 68% of the 8x2 budget
-  # -- comfortable margin, but explicitly an ESTIMATE, not a synthesis
-  # measurement. Smaller options (4x2, 6x2) were estimated close to or
-  # over their own budgets in earlier passes of that analysis. Once a real
-  # utilization number comes back from this run, this can be safely
-  # reduced if it's far under budget -- but 8x2 is the safe starting point
-  # to avoid a second area-related failure.
+  # TILE SIZE: 4x4 with a 64-word IMEM and 16-word DMEM (IM_AW / DM_AW in
+  # custom_risc_v_core.v). A Yosys + sky130 area estimate, calibrated on an
+  # earlier 4x4 run (54%), puts this at ~81.5%. To fit, I2C readback shares
+  # the CPU read ports and the register file has no reset; config.json uses
+  # density 85 without cell padding. (256 words would need ~40 tiles.)
   tiles: "4x4"   # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
 
   # Your top module name must start with "tt_um_".
-  top_module: "tt_um_mips_i2c"
+  top_module: "tt_um_custom_risc_v_core"
 
   # Every file the design uses -- a missing entry here causes an "unknown
   # module" error during synthesis, the same class of failure as the
   # earlier Icarus "unknown module" errors seen in local checks.
   source_files:
-    - "tt_um_mips_i2c.v"
-    - "top.v"
+    - "tt_um_custom_risc_v_core.v"
+    - "custom_risc_v_core.v"
     - "i2c_slave_mmio.v"
     - "mmio_decoder.v"
     - "data_memory.v"
@@ -62,7 +54,7 @@ project:
     - "Write_back_mux.v"
     - "Xor_result.v"
 
-  # The pinout of your project. Must match tt_um_mips_i2c.v exactly.
+  # The pinout of your project. Must match tt_um_custom_risc_v_core.v exactly.
 pinout:
   ui[0]: "scl"
   ui[1]: ""

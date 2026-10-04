@@ -1,9 +1,9 @@
 `timescale 1ns / 1ps
 //////////////////////////////////////////////////////////////////////////////////
-// Module Name: tt_um_mips_i2c
+// Module Name: tt_um_custom_risc_v_core
 //
 // Tiny Tapeout's fixed harness wrapper. This is the only file that talks to
-// TT's fixed pin contract; it maps those pins onto the unmodified `top`
+// TT's fixed pin contract; it maps those pins onto the unmodified `custom_risc_v_core`
 // module. No pipeline logic lives here -- pure pin plumbing.
 //
 // Pin mapping:
@@ -14,7 +14,7 @@
 //   ena        -> unused; outputs default safely regardless
 //////////////////////////////////////////////////////////////////////////////////
 
-module tt_um_mips_i2c (
+module tt_um_custom_risc_v_core (
     input  wire [7:0] ui_in,
     output wire [7:0] uo_out,
     input  wire [7:0] uio_in,
@@ -33,7 +33,7 @@ module tt_um_mips_i2c (
     wire sda_out;
     wire sda_oe_internal;
 
-    top top_inst (
+    custom_risc_v_core top_inst (
         .clk(clk),
         .rst(rst),
         .scl(scl),

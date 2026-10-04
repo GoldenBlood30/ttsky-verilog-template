@@ -9,6 +9,7 @@ input freeze,
 input [3:0] EX,
 input [1:0] M,
 input [1:0] WB,
+input FL,
 input [4:0] rs,
 input [4:0] rt,
 input [31:0] D_1,
@@ -21,6 +22,7 @@ input  [3:0] BHT_rd_addr,
 output reg [3:0] ID_EX_EX,
 output reg [1:0] ID_EX_M,
 output reg [1:0] ID_EX_WB,
+output reg ID_EX_FL,
 output reg [4:0] ID_EX_rs,
 output reg [4:0] ID_EX_rt,
 output reg [31:0] ID_EX_D_1,
@@ -38,6 +40,7 @@ begin
  ID_EX_EX<=4'b0000;
  ID_EX_M<=2'b00;
  ID_EX_WB<=2'b00;
+ ID_EX_FL<=1'b0;
  ID_EX_rs<=5'b00000;
  ID_EX_rt<=5'b00000;
  ID_EX_D_1<={32{1'b0}};
@@ -54,6 +57,7 @@ begin
  ID_EX_EX<=ID_EX_EX;
  ID_EX_M<=ID_EX_M;
  ID_EX_WB<=ID_EX_WB;
+ ID_EX_FL<=ID_EX_FL;
  ID_EX_rs<=ID_EX_rs;
  ID_EX_rt<=ID_EX_rt;
  ID_EX_D_1<=ID_EX_D_1;
@@ -69,6 +73,7 @@ begin
  ID_EX_EX<=4'b0000;
  ID_EX_M<=2'b00;
  ID_EX_WB<=2'b00;
+ ID_EX_FL<=1'b0;
  ID_EX_rs<=5'b00000;
  ID_EX_rt<=5'b00000;
  ID_EX_D_1<={32{1'b0}};
@@ -84,6 +89,7 @@ begin
  ID_EX_EX<=4'b0000;
  ID_EX_M<=2'b00;
  ID_EX_WB<=2'b00;
+ ID_EX_FL<=1'b0;
  ID_EX_rs<=5'b00000;
  ID_EX_rt<=5'b00000;
  ID_EX_D_1<={32{1'b0}};
@@ -99,6 +105,7 @@ begin
  ID_EX_EX<=EX ;
  ID_EX_M<=M;
  ID_EX_WB<=WB;
+ ID_EX_FL<=FL;
  ID_EX_rs<=rs;
  ID_EX_rt<=rt;
  ID_EX_D_1<=D_1;

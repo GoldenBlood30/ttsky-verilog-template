@@ -1,21 +1,26 @@
 `timescale 1ns / 1ps
 
-// MIPS + I2C programming wrapper.
+// Reprogrammable custom RISC-V core with its I2C programming interface.
 // External protocol:
 //   MCU writes IMEM/REGFILE/DMEM/TARGET_PC while CSR.RUN=0.
 //   MCU writes CSR.RUN=1.
 //   CPU executes normally until the next PC reaches TARGET_PC.
 //   Fetch is then blocked, the existing pipeline drains, and DONE goes high.
-//   MCU can read back any of those addresses at any time, plus the live PC
-//   at 0x3008, with a repeated-START I2C read.
+//   MCU can read back CSR, TARGET_PC and the live PC (0x3008) at any time
+//   with a repeated-START I2C read. IMEM/REGFILE/DMEM readback shares the
+//   CPU's read ports, so it is only valid while halted (RUN=0 or DONE=1).
 //
 // Memories sized for the Tiny Tapeout sky130 area budget (flip-flop arrays,
 // no SRAM macros). Depths are log2 parameters:
-//   IMEM: 2**IM_AW 32-bit words  (default IM_AW=4 -> 16 words = 512 bits)
-//   DMEM: 2**DM_AW 32-bit words  (default DM_AW=3 ->  8 words = 256 bits)
-//   REGFILE: 32 x 32-bit words (1024 bits, fixed by the ISA)
-// (IM_AW=6, DM_AW=6 restores the old 64/64 sizes but does NOT fit any TT tile.)
-module top (
+//   IMEM: 2**IM_AW 32-bit words
+//   DMEM: 2**DM_AW 32-bit words
+//   REGFILE: r1-r31 x 32 bits (r0 reads 0), no reset
+// IM_AW and DM_AW below are the only place the sizes are set; they are passed
+// down to IMEM, DMEM, the MMIO decoder and the BTB (BTB_W = IM_AW+3).
+module custom_risc_v_core #(
+    parameter IM_AW = 6,   // 2**IM_AW = 64 IMEM words
+    parameter DM_AW = 4    // 2**DM_AW = 16 DMEM words
+) (
     input  clk,
     input  rst,
     input  scl,
@@ -29,10 +34,12 @@ module top (
     wire [31:0] D_1, D_2;
     wire [3:0] EX_w;
     wire [1:0] M_w, WB_w;
+    wire FL_w;
     wire [31:0] immediate_w;
 
     wire [3:0] ID_EX_EX;
     wire [1:0] ID_EX_M, ID_EX_WB;
+    wire ID_EX_FL;
     wire [4:0] ID_EX_rs, ID_EX_rt;
     wire [31:0] ID_EX_D_1, ID_EX_D_2;
     wire ID_EX_comparator;
@@ -46,6 +53,7 @@ module top (
     wire [31:0] operand_1_w, rt_f_w, operand_2_w;
     wire [31:0] R_w;
     wire zero_w;
+    wire CF_w, SF_w, OF_w, PF_w, AF_w;
     wire [4:0] rd_w;
     wire PHT_write_w, BHT_write_w, BTB_write_w;
 
@@ -53,6 +61,8 @@ module top (
     wire [4:0] EX_MEM_rs, EX_MEM_rt;
     wire [31:0] EX_MEM_R, EX_MEM_rt_f;
     wire [4:0] EX_MEM_rd;
+    wire [5:0] EX_MEM_flags, MEM_WB_flags;
+    wire EX_MEM_FL, MEM_WB_FL;
     wire [31:0] mem_rd_data_w;
     wire [1:0] MEM_WB_WB;
     wire [31:0] MEM_WB_Rd_data, MEM_WB_R;
@@ -67,7 +77,7 @@ module top (
     wire [31:0] mmio_wdata;
 
     wire        imem_prog_we;
-    wire [5:0]  imem_prog_addr;
+    wire [7:0]  imem_prog_addr;
     wire [31:0] imem_prog_wdata;
     wire        regfile_prog_we;
     wire [4:0]  regfile_prog_addr;
@@ -142,9 +152,10 @@ module top (
         .mmio_rdata(mmio_rdata)
     );
 
-    mmio_decoder MMIO_inst(
+    mmio_decoder #(.IM_AW(IM_AW), .DM_AW(DM_AW)) MMIO_inst(
         .clk(clk), .rst(rst), .mmio_wr(mmio_wr),
         .mmio_addr(mmio_addr), .mmio_wdata(mmio_wdata), .done(done),
+        .flags_in(MEM_WB_flags), .flags_we(MEM_WB_FL),
         .imem_prog_we(imem_prog_we), .imem_prog_addr(imem_prog_addr),
         .imem_prog_wdata(imem_prog_wdata),
         .regfile_prog_we(regfile_prog_we), .regfile_prog_addr(regfile_prog_addr),
@@ -162,9 +173,9 @@ module top (
         .hold(pc_hold), .rst(rst), .PC_out(PC_out)
     );
 
-    instruction_memory IM_inst(
+    instruction_memory #(.IM_AW(IM_AW)) IM_inst(
         .rst(rst), .clk(clk), .PC_out(PC_out),
-        .instruction_code(instruction_code),
+        .instruction_code(instruction_code), .halted(pipeline_freeze),
         .prog_we(imem_prog_we), .prog_addr(imem_prog_addr),
         .prog_wdata(imem_prog_wdata), .prog_rdata(imem_prog_rdata)
     );
@@ -177,7 +188,7 @@ module top (
         .rst(rst), .PHT_rd_data(PHT_rd_data)
     );
 
-    BTB BTB_inst(
+    BTB #(.BTB_W(IM_AW + 3)) BTB_inst(
         .clk(clk), .rd_addr(PC_out[5:2]), .BTB_write_control(BTB_write_w),
         .ID_EX_PHT_wr_addr(ID_EX_PC_out[5:2]), .BTB_write_data(PC_calculated),
         .rst(rst), .BTB_rd_data(BTB_rd_data)
@@ -203,19 +214,20 @@ module top (
     reg_file REGFILE_inst(
         .clk(clk), .rst(rst), .rs(rs_w), .rt(rt_w), .rd(MEM_WB_rd),
         .write_data(write_data_w), .Reg_write(MEM_WB_WB[1]), .D_1(D_1), .D_2(D_2),
+        .halted(pipeline_freeze),
         .prog_we(regfile_prog_we), .prog_addr(regfile_prog_addr), .prog_wdata(regfile_prog_wdata),
         .prog_rdata(regfile_prog_rdata)
     );
 
-    control_unit CU_inst(.rst(rst), .opcode(opcode_w), .EX(EX_w), .M(M_w), .WB(WB_w));
+    control_unit CU_inst(.rst(rst), .opcode(opcode_w), .EX(EX_w), .M(M_w), .WB(WB_w), .FL(FL_w));
     Sign_extender SE_inst(.imm(imm_w), .immediate(immediate_w));
 
     ID_EX_register ID_EX_inst(
         .rst(rst), .clk(clk), .ID_EX_flush(ID_EX_flush), .ID_EX_stall(ID_EX_stall), .freeze(pipeline_freeze),
-        .EX(EX_w), .M(M_w), .WB(WB_w), .rs(rs_w), .rt(rt_w), .D_1(D_1), .D_2(D_2),
+        .EX(EX_w), .M(M_w), .WB(WB_w), .FL(FL_w), .rs(rs_w), .rt(rt_w), .D_1(D_1), .D_2(D_2),
         .comparator(IF_ID_comparator), .rd_maybe(rd_maybe_w), .immediate(immediate_w),
         .PC_out(IF_ID_PC_out), .BHT_rd_addr(IF_ID_BHT_rd_addr), .ID_EX_EX(ID_EX_EX),
-        .ID_EX_M(ID_EX_M), .ID_EX_WB(ID_EX_WB), .ID_EX_rs(ID_EX_rs), .ID_EX_rt(ID_EX_rt),
+        .ID_EX_M(ID_EX_M), .ID_EX_WB(ID_EX_WB), .ID_EX_FL(ID_EX_FL), .ID_EX_rs(ID_EX_rs), .ID_EX_rt(ID_EX_rt),
         .ID_EX_D_1(ID_EX_D_1), .ID_EX_D_2(ID_EX_D_2), .ID_EX_comparator(ID_EX_comparator),
         .ID_EX_rd_maybe(ID_EX_rd_maybe), .ID_EX_immediate(ID_EX_immediate),
         .ID_EX_PC_out(ID_EX_PC_out), .ID_EX_BHT_rd_addr(ID_EX_BHT_rd_addr)
@@ -229,7 +241,11 @@ module top (
     Forward_rs FWD_RS_inst(.forward_rs(forward_rs_w), .D_1(ID_EX_D_1), .Mem_WB_write_data(write_data_w), .EX_MEM_R(EX_MEM_R), .operand_1(operand_1_w));
     forward_rt FWD_RT_inst(.forward_rt(forward_rt_w), .D_2(ID_EX_D_2), .Mem_WB_write_data(write_data_w), .EX_MEM_R(EX_MEM_R), .rt_f(rt_f_w));
     mux_1_execution MUX1_EX_inst(.rt_f(rt_f_w), .ID_EX_immediate(ID_EX_immediate), .Alu_src(ID_EX_EX[0]), .operand_2(operand_2_w));
-    ALU ALU_inst(.operand_1(operand_1_w), .operand_2(operand_2_w), .ALUOp(ID_EX_EX[2:1]), .R(R_w), .zero(zero_w));
+    ALU ALU_inst(
+        .operand_1(operand_1_w), .operand_2(operand_2_w), .ALUOp(ID_EX_EX[2:1]),
+        .R(R_w), .zero(zero_w),
+        .CF(CF_w), .SF(SF_w), .OF(OF_w), .PF(PF_w), .AF(AF_w)
+    );
     mux_2_execution MUX2_EX_inst(.zero(zero_w), .immediate(ID_EX_immediate), .PC_out(ID_EX_PC_out), .PC_calculated(PC_calculated));
     mux_3_execution MUX3_EX_inst(.ID_EX_rd_maybe(ID_EX_rd_maybe), .ID_EX_rt(ID_EX_rt), .Reg_dst(ID_EX_EX[3]), .rd(rd_w));
     Flushing_unit FLUSH_inst(.comparator(ID_EX_comparator), .IF_ID_PC_out(IF_ID_PC_out), .PC_calculated(PC_calculated), .IF_ID_flush(IF_ID_flush), .PC_flush(PC_flush), .ID_EX_flush(ID_EX_flush));
@@ -241,22 +257,28 @@ module top (
 
     EX_MEM_Register EX_MEM_inst(
         .clk(clk), .rst(rst), .ID_EX_M(ID_EX_M), .ID_EX_WB(ID_EX_WB), .ID_EX_rs(ID_EX_rs),
-        .ID_EX_rt(ID_EX_rt), .R(R_w), .rt_f(rt_f_w), .rd(rd_w), .freeze(pipeline_freeze), .EX_MEM_M(EX_MEM_M),
+        .ID_EX_rt(ID_EX_rt), .R(R_w), .rt_f(rt_f_w), .rd(rd_w),
+        .flags({AF_w, PF_w, OF_w, SF_w, CF_w, zero_w}), .ID_EX_FL(ID_EX_FL),
+        .freeze(pipeline_freeze), .EX_MEM_M(EX_MEM_M),
         .EX_MEM_WB(EX_MEM_WB), .EX_MEM_rs(EX_MEM_rs), .EX_MEM_rt(EX_MEM_rt),
-        .EX_MEM_R(EX_MEM_R), .EX_MEM_rt_f(EX_MEM_rt_f), .EX_MEM_rd(EX_MEM_rd)
+        .EX_MEM_R(EX_MEM_R), .EX_MEM_rt_f(EX_MEM_rt_f), .EX_MEM_rd(EX_MEM_rd),
+        .EX_MEM_flags(EX_MEM_flags), .EX_MEM_FL(EX_MEM_FL)
     );
 
-    data_memory DM_inst(
+    data_memory #(.DM_AW(DM_AW)) DM_inst(
         .clk(clk), .rst(rst), .Mem_rd(EX_MEM_M[1]), .Mem_write(EX_MEM_M[0]),
         .rd_addr(EX_MEM_R), .write_data(EX_MEM_rt_f), .rd_data(mem_rd_data_w),
+        .halted(pipeline_freeze),
         .prog_we(dmem_prog_we), .prog_addr(dmem_prog_addr), .prog_wdata(dmem_prog_wdata),
         .prog_rdata(dmem_prog_rdata)
     );
 
     M_WB_Register MEM_WB_inst(
         .rst(rst), .clk(clk), .EX_MEM_WB(EX_MEM_WB), .Rd_data(mem_rd_data_w),
-        .EX_MEM_R(EX_MEM_R), .EX_MEM_rd(EX_MEM_rd), .freeze(pipeline_freeze), .MEM_WB_WB(MEM_WB_WB),
-        .MEM_WB_Rd_data(MEM_WB_Rd_data), .MEM_WB_R(MEM_WB_R), .MEM_WB_rd(MEM_WB_rd)
+        .EX_MEM_R(EX_MEM_R), .EX_MEM_rd(EX_MEM_rd), .EX_MEM_flags(EX_MEM_flags), .EX_MEM_FL(EX_MEM_FL),
+        .freeze(pipeline_freeze), .MEM_WB_WB(MEM_WB_WB),
+        .MEM_WB_Rd_data(MEM_WB_Rd_data), .MEM_WB_R(MEM_WB_R), .MEM_WB_rd(MEM_WB_rd),
+        .MEM_WB_flags(MEM_WB_flags), .MEM_WB_FL(MEM_WB_FL)
     );
     Write_back_mux WB_MUX_inst(.MEM_WB_Rd_data(MEM_WB_Rd_data), .MEM_WB_R(MEM_WB_R), .Mem_to_Reg(MEM_WB_WB[0]), .write_data(write_data_w));
 
